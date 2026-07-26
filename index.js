@@ -90,3 +90,4 @@ const server = http.createServer(async (req, res) => {
   } else { res.writeHead(404); res.end('not found'); }
 });
 ensureSchema().then(() => { scrapeAll(); setInterval(scrapeAll, 3 * 60 * 60 * 1000); server.listen(process.env.PORT || 3000); });
+
