@@ -4,7 +4,11 @@ const http = require('http');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 const SOURCES = [
   { type: 'byt', url: 'https://www.nehnutelnosti.sk/vysledky/byty/predaj' },
+  { type: 'byt', url: 'https://www.nehnutelnosti.sk/vysledky/byty/predaj?page=2' },
+  { type: 'byt', url: 'https://www.nehnutelnosti.sk/vysledky/byty/predaj?page=3' },
   { type: 'dom', url: 'https://www.nehnutelnosti.sk/vysledky/domy/predaj' },
+  { type: 'dom', url: 'https://www.nehnutelnosti.sk/vysledky/domy/predaj?page=2' },
+  { type: 'dom', url: 'https://www.nehnutelnosti.sk/vysledky/domy/predaj?page=3' },
   { type: 'byt', url: 'https://www.topreality.sk/byty.html' },
   { type: 'dom', url: 'https://www.topreality.sk/domy.html' },
   { type: 'byt', url: 'https://reality.bazos.sk/predam/byt/' },
@@ -27,20 +31,35 @@ async function scrapeSource(browser, source) {
       const priceRe = /(\d[\d\s.]{2,12})\s*(€|Eur\b)/;
       const all = Array.from(document.querySelectorAll('body *'));
       for (const el of all) {
-        if (el.children.length > 2) continue;
+        if (el.children.length > 4) continue;
         const text = (el.textContent || '').trim();
         if (!text || text.length > 60) continue;
         const m = text.match(priceRe);
         if (!m) continue;
         const price = parseInt(m[1].replace(/[\s.]/g, ''), 10);
         if (!price || price < 3000) continue;
-        const link = el.closest('a[href]') || el.querySelector('a[href]');
+        const link = el.closest('a[href]') || el.querySelector('a[href]')
+          || (el.closest('tr') && el.closest('tr').querySelector('a[href]'))
+          || (el.parentElement && el.parentElement.querySelector('a[href]'));
         if (!link) continue;
         const href = link.getAttribute('href');
         if (!href || seen.has(href)) continue;
         seen.add(href);
-        let title = (link.innerText || link.getAttribute('title') || href || '').split('\n')[0].trim();
-        if (!title) title = href;
+        // find a real title near the price: image alt text, a heading, or the longest nearby text that isn't the price itself
+        let title = '';
+        let container = link.closest('article, li, tr, div') || link.parentElement;
+        for (let hop = 0; hop < 5 && container && !title; hop++) {
+          const img = container.querySelector('img[alt]');
+          if (img && img.alt && img.alt.trim().length > 8 && !priceRe.test(img.alt)) { title = img.alt.trim(); break; }
+          const heading = container.querySelector('h1,h2,h3,h4,h5');
+          if (heading && heading.textContent.trim().length > 8) { title = heading.textContent.trim(); break; }
+          const candidates = Array.from(container.querySelectorAll('*'))
+            .map(e => (e.children.length === 0 ? e.textContent.trim() : ''))
+            .filter(t => t.length > 12 && t.length < 150 && !priceRe.test(t));
+          if (candidates.length) { title = candidates.sort((a, b) => b.length - a.length)[0]; break; }
+          container = container.parentElement;
+        }
+        if (!title) title = link.getAttribute('title') || href;
         results.push({ href, price, title: title.slice(0, 150) });
       }
       return results;
